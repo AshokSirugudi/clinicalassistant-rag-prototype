@@ -1,0 +1,2 @@
+appointment_id,patient_id,appointment_date,clinician,status,visit_reason,visit_summary
+A901,P999,2026-10-10,Ellis Briarfen,completed,Wrist discomfort,Reviewed the effect of typing breaks.
