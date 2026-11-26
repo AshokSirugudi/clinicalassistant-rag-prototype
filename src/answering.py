@@ -14,9 +14,9 @@ from .config import PROJECT_ROOT, AppConfig
 from .embeddings import MAX_RETRIES, REQUEST_TIMEOUT_SECONDS
 from .models import SHARED_PATIENT_ID, DocumentSourceMetadata, NonBlankString
 from .retrieval import (
+    CitableEvidence,
     RelevanceResult,
     RetrievalError,
-    RetrievalResult,
     retrieve_relevant,
     source_directories,
     validate_source_classification,
@@ -173,7 +173,7 @@ def generate_answer(
     return AnswerResult("answered", ANSWER_MESSAGE, excerpts=tuple(excerpts))
 
 
-def _paragraphs(hit: RetrievalResult) -> tuple[str, ...]:
+def _paragraphs(hit: CitableEvidence) -> tuple[str, ...]:
     metadata = hit.source_metadata
     prefix = f"# {metadata.title}\n\n## {metadata.section_heading}\n"
     if not hit.text.startswith(prefix):
