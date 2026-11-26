@@ -1,6 +1,7 @@
 """Embed validated chunks while keeping their identities and metadata local."""
 
 from collections.abc import Sequence
+from hashlib import shake_256
 from math import isfinite
 
 from openai import OpenAI, OpenAIError
@@ -11,6 +12,8 @@ from .models import DocumentChunk
 BATCH_SIZE = 32
 REQUEST_TIMEOUT_SECONDS = 30.0
 MAX_RETRIES = 2
+SYNTHETIC_MODEL = "synthetic-shake256-v1"
+SYNTHETIC_DIMENSIONS = 1536
 MODEL_DIMENSIONS = {
     "text-embedding-3-small": 1536,
     "text-embedding-3-large": 3072,
@@ -20,6 +23,24 @@ MODEL_DIMENSIONS = {
 
 class EmbeddingError(RuntimeError):
     """An embedding request or response failed without a usable result."""
+
+
+def synthetic_vector(text: str) -> list[float]:
+    """Generate the same offline vector for a text in ingestion and retrieval."""
+    return [
+        (byte - 127.5) / 127.5
+        for byte in shake_256(text.encode("utf-8")).digest(SYNTHETIC_DIMENSIONS)
+    ]
+
+
+def embed_question(
+    question: str, config: AppConfig, *, client: OpenAI | None = None
+) -> list[float]:
+    """Embed one question using the same SDK settings and validation as chunks."""
+    vector = _embed_records([("question", question)], config, client)["question"]
+    if not any(vector):
+        raise EmbeddingError("Question embedding has zero magnitude")
+    return vector
 
 
 def embed_chunks(
@@ -34,6 +55,12 @@ def embed_chunks(
         return {}
     if len({chunk_id for chunk_id, _ in records}) != len(records):
         raise EmbeddingError("Duplicate chunk IDs in embedding input")
+    return _embed_records(records, config, client)
+
+
+def _embed_records(
+    records: list[tuple[str, str]], config: AppConfig, client: OpenAI | None
+) -> dict[str, list[float]]:
     dimensions = MODEL_DIMENSIONS.get(config.embedding_model)
     if dimensions is None:
         raise EmbeddingError("Configured embedding model has no known vector dimensions")

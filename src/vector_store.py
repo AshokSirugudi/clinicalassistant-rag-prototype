@@ -7,21 +7,35 @@ reconciling stale IDs when source documents change or are removed.
 from collections.abc import Mapping, Sequence
 from math import isfinite
 from struct import Struct, error as StructError
+from typing import Literal
 
 import chromadb
 from chromadb.config import Settings
+from chromadb.errors import NotFoundError
 
 from .config import AppConfig
-from .embeddings import MODEL_DIMENSIONS
+from .embeddings import MODEL_DIMENSIONS, SYNTHETIC_DIMENSIONS, SYNTHETIC_MODEL
 from .models import DocumentChunk
 
 COLLECTION_NAME = "clinical_chunks_v1"
-SYNTHETIC_MODEL = "synthetic-shake256-v1"
-SYNTHETIC_DIMENSIONS = 1536
+type EmbeddingMode = Literal["synthetic", "openai"]
 
 
 class VectorStoreError(RuntimeError):
     """Vector store inputs, configuration, or writes failed."""
+
+
+def index_config(config: AppConfig, mode: EmbeddingMode) -> AppConfig:
+    """Resolve the index location and model identity for an embedding mode."""
+    if mode == "synthetic":
+        return config.model_copy(update={
+            "chroma_dir": config.chroma_dir / "SYNTHETIC",
+            "embedding_model": SYNTHETIC_MODEL,
+            "openai_api_key": None,
+        })
+    if mode == "openai":
+        return config.model_copy(update={"chroma_dir": config.chroma_dir / "openai"})
+    raise VectorStoreError("Unknown embedding mode")
 
 
 def _vector_dimensions(model: str) -> int:
@@ -33,25 +47,32 @@ def _vector_dimensions(model: str) -> int:
     return dimensions
 
 
-def open_chunk_collection(config: AppConfig):
+def open_chunk_collection(config: AppConfig, *, create: bool = True):
     """Open the configured collection and verify its compatibility before use."""
     expected_metadata = {
         "embedding_model": config.embedding_model,
         "embedding_dimensions": _vector_dimensions(config.embedding_model),
     }
+    if not create and not (config.chroma_dir / "chroma.sqlite3").is_file():
+        raise VectorStoreError("ChromaDB index does not exist for the selected mode")
     try:
         client = chromadb.PersistentClient(
             path=config.chroma_dir, settings=Settings(anonymized_telemetry=False)
         )
-        collection = client.get_or_create_collection(
-            COLLECTION_NAME,
-            configuration={"hnsw": {"space": "cosine"}},
-            metadata=expected_metadata,
-            embedding_function=None,
-        )
+        if create:
+            collection = client.get_or_create_collection(
+                COLLECTION_NAME,
+                configuration={"hnsw": {"space": "cosine"}},
+                metadata=expected_metadata,
+                embedding_function=None,
+            )
+        else:
+            collection = client.get_collection(COLLECTION_NAME, embedding_function=None)
         settings = collection.configuration
         metadata = collection.metadata or {}
         max_batch_size = client.get_max_batch_size()
+    except NotFoundError:
+        raise VectorStoreError("ChromaDB collection does not exist for the selected mode") from None
     except Exception:
         raise VectorStoreError("Unable to open the ChromaDB collection") from None
 
