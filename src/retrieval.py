@@ -4,6 +4,7 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from math import isfinite
 from pathlib import Path, PurePosixPath
+from typing import Literal
 
 from .config import PROJECT_ROOT, AppConfig
 from .embeddings import EmbeddingError, embed_question, synthetic_vector
@@ -32,6 +33,43 @@ class RetrievalResult:
     source_id: str
     chunk_position: int
     source_metadata: DocumentSourceMetadata
+
+
+type RelevanceStatus = Literal["no_matches", "all_below_relevance", "potentially_relevant"]
+
+
+@dataclass(frozen=True)
+class RelevanceResult:
+    status: RelevanceStatus
+    accepted_results: tuple[RetrievalResult, ...]
+    retrieved_count: int
+    rejected_count: int
+
+
+def retrieve_relevant(
+    patient_id: str,
+    question: str,
+    *,
+    config: AppConfig,
+    mode: EmbeddingMode,
+    accepted_patient_ids: Collection[str],
+    project_root: Path = PROJECT_ROOT,
+) -> RelevanceResult:
+    """Apply the configured distance limit after validating the whole retrieval response."""
+    results = retrieve(
+        patient_id, question, config=config, mode=mode,
+        accepted_patient_ids=accepted_patient_ids, project_root=project_root,
+    )
+    threshold = config.max_cosine_distance
+    accepted = tuple(hit for hit in results if threshold is None or hit.distance <= threshold)
+    status: RelevanceStatus
+    if accepted:
+        status = "potentially_relevant"
+    elif results:
+        status = "all_below_relevance"
+    else:
+        status = "no_matches"
+    return RelevanceResult(status, accepted, len(results), len(results) - len(accepted))
 
 
 def retrieve(

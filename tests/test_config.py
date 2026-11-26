@@ -9,7 +9,10 @@ from src.config import AppConfig, load_config
 
 @pytest.fixture(autouse=True)
 def clear_config_environment(monkeypatch):
-    for variable in ("CHROMA_DIR", "EMBEDDING_MODEL", "LLM_MODEL", "RETRIEVAL_TOP_K", "OPENAI_API_KEY"):
+    for variable in (
+        "CHROMA_DIR", "EMBEDDING_MODEL", "LLM_MODEL", "RETRIEVAL_TOP_K",
+        "RETRIEVAL_MAX_COSINE_DISTANCE", "OPENAI_API_KEY",
+    ):
         monkeypatch.delenv(variable, raising=False)
 
 
@@ -97,3 +100,22 @@ def test_blank_storage_override(tmp_path, monkeypatch):
     monkeypatch.setenv("CHROMA_DIR", " ")
     with pytest.raises(ValueError, match="CHROMA_DIR"):
         load_config(tmp_path)
+
+
+@pytest.mark.parametrize(("override", "expected"), [
+    ("", None), ("  ", None), (" off ", None), ("0", 0.0), (" 1.25 ", 1.25), ("2", 2.0),
+])
+def test_max_cosine_distance_environment_overrides(tmp_path, monkeypatch, override, expected):
+    assert load_config(tmp_path).max_cosine_distance is None
+    (tmp_path / ".env").write_text("RETRIEVAL_MAX_COSINE_DISTANCE=1\n", encoding="utf-8")
+    assert load_config(tmp_path).max_cosine_distance == 1.0
+    monkeypatch.setenv("RETRIEVAL_MAX_COSINE_DISTANCE", override)
+    assert load_config(tmp_path).max_cosine_distance == expected
+
+
+@pytest.mark.parametrize("value", [
+    True, False, -0.01, 2.01, float("nan"), float("inf"), float("-inf"), "NaN", "Infinity", "invalid",
+])
+def test_invalid_max_cosine_distance(value):
+    with pytest.raises(ValidationError, match="max_cosine_distance"):
+        AppConfig(max_cosine_distance=value)
