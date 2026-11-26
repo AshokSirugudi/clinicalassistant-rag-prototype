@@ -13,7 +13,7 @@ from src.dataset_validation import validate_dataset
 from src.document_loader import load_documents
 from src.embeddings import SYNTHETIC_MODEL, synthetic_vector
 from src.ingest import _synthetic_embeddings
-from src.retrieval import RetrievalEmbeddingError, RetrievalError, RetrievalIndexError, retrieve
+from src.retrieval import RetrievalEmbeddingError, RetrievalError, RetrievalIndexError, retrieve, retrieve_relevant
 from src.vector_store import COLLECTION_NAME, index_config, open_chunk_collection, upsert_chunks
 
 PATIENT_IDS = {"P001", "P002", "P009"}
@@ -61,6 +61,12 @@ def vector(x, y, z):
 
 def search(config, patient_id="P001", question=QUESTION, mode="synthetic"):
     return retrieve(patient_id, question, config=config, mode=mode, accepted_patient_ids=PATIENT_IDS)
+
+
+def search_relevant(config, patient_id="P001"):
+    return retrieve_relevant(
+        patient_id, QUESTION, config=config, mode="synthetic", accepted_patient_ids=PATIENT_IDS
+    )
 
 
 def test_query_filters_before_top_k_and_returns_citations(config, evidence, monkeypatch):
@@ -179,6 +185,10 @@ def test_no_matches_is_an_empty_list(config, evidence):
     other = evidence[2]
     upsert_chunks(index_config(config, "synthetic"), [other], {other.chunk_id: vector(1.0, 0.0, 0.0)})
     assert search(config) == []
+    result = search_relevant(config)
+    assert (result.status, result.accepted_results, result.retrieved_count, result.rejected_count) == (
+        "no_matches", (), 0, 0,
+    )
 
 
 def test_missing_index_is_not_created(config):
@@ -265,6 +275,56 @@ def test_visit_note_relabeled_as_shared_rejects_the_whole_response(config, evide
     monkeypatch.setattr(Collection, "query", lambda self, **kwargs: response)
     with pytest.raises(RetrievalError, match="malformed evidence"):
         search(config)
+    with pytest.raises(RetrievalError, match="malformed evidence"):
+        search_relevant(config.model_copy(update={"max_cosine_distance": 0.15}))
+
+
+@pytest.fixture
+def relevance_index(config, evidence, corpus_chunks, monkeypatch):
+    own, shared, other = evidence
+    far = corpus_chunks["data/shared/home-blood-pressure-log.md", "What to Record"]
+    config = config.model_copy(update={"top_k": 3})
+    query_vector = vector(1.0, 0.0, 0.0)
+    upsert_chunks(index_config(config, "synthetic"), [own, shared, far, other], {
+        own.chunk_id: query_vector,
+        shared.chunk_id: vector(0.0, 1.0, 0.0),
+        far.chunk_id: vector(-1.0, 0.0, 0.0),
+        other.chunk_id: query_vector,
+    })
+    monkeypatch.setattr("src.retrieval.synthetic_vector", lambda question: query_vector)
+    return config, (own, shared, far)
+
+
+@pytest.mark.parametrize(("threshold", "kept"), [(None, 3), (0.0, 1), (1.0, 2), (2.0, 3)])
+def test_relevance_threshold_preserves_scoped_ranking_and_citations(relevance_index, monkeypatch, threshold, kept):
+    config, expected = relevance_index
+    config = config.model_copy(update={"max_cosine_distance": threshold})
+    query = Collection.query
+    calls = []
+
+    def record_query(self, **kwargs):
+        calls.append(kwargs)
+        return query(self, **kwargs)
+
+    monkeypatch.setattr(Collection, "query", record_query)
+    result = search_relevant(config)
+    assert len(calls) == 1
+    assert calls[0]["where"] == {"patient_id": {"$in": ["P001", "SHARED"]}}
+    assert calls[0]["n_results"] == 3
+    assert result.status == "potentially_relevant"
+    assert (result.retrieved_count, result.rejected_count) == (3, 3 - kept)
+    assert [hit.distance for hit in result.accepted_results] == [0.0, 1.0, 2.0][:kept]
+    for hit, chunk in zip(result.accepted_results, expected[:kept], strict=True):
+        assert (hit.patient_id, hit.chunk_id, hit.text) == (chunk.patient_id, chunk.chunk_id, chunk.text)
+        assert hit.source_metadata == chunk.source_metadata
+
+
+def test_retrieved_but_all_below_relevance(relevance_index):
+    config, _ = relevance_index
+    result = search_relevant(config.model_copy(update={"max_cosine_distance": 0.0}), patient_id="P002")
+    assert (result.status, result.accepted_results, result.retrieved_count, result.rejected_count) == (
+        "all_below_relevance", (), 2, 2,
+    )
 
 
 def test_mocked_openai_query_uses_existing_embedding_service(config, evidence, monkeypatch):

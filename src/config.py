@@ -22,6 +22,7 @@ ENV_OVERRIDES = {
     "embedding_model": "EMBEDDING_MODEL",
     "llm_model": "LLM_MODEL",
     "top_k": "RETRIEVAL_TOP_K",
+    "max_cosine_distance": "RETRIEVAL_MAX_COSINE_DISTANCE",
     "openai_api_key": "OPENAI_API_KEY",
 }
 
@@ -37,6 +38,7 @@ class AppConfig(BaseModel):
     embedding_model: NonBlankString = "text-embedding-3-small"
     llm_model: NonBlankString = "gpt-4.1-mini"
     top_k: Annotated[int, Field(strict=True, gt=0)] = 5
+    max_cosine_distance: Annotated[float, Field(ge=0, le=2, allow_inf_nan=False)] | None = None
     openai_api_key: SecretStr | None = Field(default=None, repr=False, exclude=True)
 
     @field_validator("top_k", mode="before")
@@ -46,6 +48,16 @@ class AppConfig(BaseModel):
             if not re.fullmatch(r"[0-9]+", value.strip()):
                 raise ValueError("top_k must be a positive integer")
             return int(value)
+        return value
+
+    @field_validator("max_cosine_distance", mode="before")
+    @classmethod
+    def parse_max_cosine_distance(cls, value: object) -> object:
+        if isinstance(value, str):
+            value = value.strip()
+            return None if value.lower() in ("", "off") else value
+        if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))):
+            raise ValueError("max_cosine_distance must be a finite number between 0 and 2, or off")
         return value
 
     @field_validator("openai_api_key")
