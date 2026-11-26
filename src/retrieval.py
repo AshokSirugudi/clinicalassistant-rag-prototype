@@ -35,13 +35,25 @@ class RetrievalResult:
     source_metadata: DocumentSourceMetadata
 
 
+@dataclass(frozen=True)
+class KeywordResult:
+    text: str
+    chunk_id: str
+    keyword_score: int
+    patient_id: str
+    source_id: str
+    chunk_position: int
+    source_metadata: DocumentSourceMetadata
+
+
+type CitableEvidence = RetrievalResult | KeywordResult
 type RelevanceStatus = Literal["no_matches", "all_below_relevance", "potentially_relevant"]
 
 
 @dataclass(frozen=True)
 class RelevanceResult:
     status: RelevanceStatus
-    accepted_results: tuple[RetrievalResult, ...]
+    accepted_results: tuple[CitableEvidence, ...]
     retrieved_count: int
     rejected_count: int
 
