@@ -90,7 +90,7 @@ def retrieve(
     if mode not in ("synthetic", "openai"):
         raise RetrievalError("Unknown embedding mode")
 
-    visit_notes_dir, shared_docs_dir = _source_directories(config, project_root)
+    visit_notes_dir, shared_docs_dir = source_directories(config, project_root)
     try:
         collection, _ = open_chunk_collection(index_config(config, mode), create=False)
     except VectorStoreError as error:
@@ -127,7 +127,7 @@ def retrieve(
     return sorted(results, key=lambda result: result.distance)
 
 
-def _source_directories(config: AppConfig, project_root: Path) -> tuple[PurePosixPath, PurePosixPath]:
+def source_directories(config: AppConfig, project_root: Path) -> tuple[PurePosixPath, PurePosixPath]:
     try:
         root = project_root.resolve()
         notes = (root / config.visit_notes_dir).resolve().relative_to(root)
@@ -158,15 +158,26 @@ def _checked_result(
         key: value for key, value in metadata.items() if key in DocumentSourceMetadata.model_fields
     })
     source_id = metadata["source_id"]
+    validate_source_classification(patient_id, source_id, citation, visit_notes_dir, shared_docs_dir)
+    return RetrievalResult(text, chunk_id, float(distance), patient_id, source_id, metadata["chunk_position"], citation)
+
+
+def validate_source_classification(
+    patient_id: str,
+    source_id: str,
+    citation: DocumentSourceMetadata,
+    visit_notes_dir: PurePosixPath,
+    shared_docs_dir: PurePosixPath,
+) -> None:
+    """Require the citation path and source type to agree with its patient scope."""
     path = PurePosixPath(citation.source_path)
     if path.is_absolute() or ".." in path.parts or "\\" in citation.source_path or path.suffix != ".md":
         raise ValueError
     shared = patient_id == SHARED_PATIENT_ID
-    if shared != (citation.source_type == "shared_guidance"):
+    if citation.source_type != ("shared_guidance" if shared else "visit_note"):
         raise ValueError
     if shared:
         if source_id != citation.source_path or path == shared_docs_dir or not path.is_relative_to(shared_docs_dir):
             raise ValueError
     elif source_id != citation.appointment_id or path != visit_notes_dir / patient_id / f"{source_id}.md":
         raise ValueError
-    return RetrievalResult(text, chunk_id, float(distance), patient_id, source_id, metadata["chunk_position"], citation)
