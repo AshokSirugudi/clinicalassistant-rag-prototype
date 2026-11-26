@@ -3,9 +3,9 @@
 from collections.abc import Collection
 from dataclasses import dataclass
 from math import isfinite
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
-from .config import AppConfig
+from .config import PROJECT_ROOT, AppConfig
 from .embeddings import EmbeddingError, embed_question, synthetic_vector
 from .models import SHARED_PATIENT_ID, DocumentSourceMetadata
 from .vector_store import EmbeddingMode, VectorStoreError, index_config, open_chunk_collection
@@ -41,6 +41,7 @@ def retrieve(
     config: AppConfig,
     mode: EmbeddingMode,
     accepted_patient_ids: Collection[str],
+    project_root: Path = PROJECT_ROOT,
 ) -> list[RetrievalResult]:
     """Return scoped evidence in ascending distance order, or an empty list for no matches."""
     patient_id, question = patient_id.strip(), question.strip()
@@ -51,6 +52,7 @@ def retrieve(
     if mode not in ("synthetic", "openai"):
         raise RetrievalError("Unknown embedding mode")
 
+    visit_notes_dir, shared_docs_dir = _source_directories(config, project_root)
     try:
         collection, _ = open_chunk_collection(index_config(config, mode), create=False)
     except VectorStoreError as error:
@@ -79,7 +81,7 @@ def retrieve(
         if len(set(ids)) != len(ids) or len(ids) > config.top_k:
             raise ValueError
         results = [
-            _checked_result(chunk_id, text, distance, metadata, allowed)
+            _checked_result(chunk_id, text, distance, metadata, allowed, visit_notes_dir, shared_docs_dir)
             for chunk_id, text, distance, metadata in zip(ids, texts, distances, metadatas, strict=True)
         ]
     except (KeyError, TypeError, ValueError, OverflowError):
@@ -87,7 +89,22 @@ def retrieve(
     return sorted(results, key=lambda result: result.distance)
 
 
-def _checked_result(chunk_id, text, distance, metadata, allowed: list[str]) -> RetrievalResult:
+def _source_directories(config: AppConfig, project_root: Path) -> tuple[PurePosixPath, PurePosixPath]:
+    try:
+        root = project_root.resolve()
+        notes = (root / config.visit_notes_dir).resolve().relative_to(root)
+        shared = (root / config.shared_docs_dir).resolve().relative_to(root)
+    except (OSError, RuntimeError, ValueError):
+        raise RetrievalError("Document source directories must be within the project") from None
+    if notes.is_relative_to(shared) or shared.is_relative_to(notes):
+        raise RetrievalError("Visit-note and shared source directories must be separate")
+    return PurePosixPath(notes.as_posix()), PurePosixPath(shared.as_posix())
+
+
+def _checked_result(
+    chunk_id, text, distance, metadata, allowed: list[str],
+    visit_notes_dir: PurePosixPath, shared_docs_dir: PurePosixPath,
+) -> RetrievalResult:
     patient_id = metadata["patient_id"]
     if patient_id not in allowed:
         raise RetrievalError("ChromaDB returned evidence outside the selected patient scope")
@@ -110,8 +127,8 @@ def _checked_result(chunk_id, text, distance, metadata, allowed: list[str]) -> R
     if shared != (citation.source_type == "shared_guidance"):
         raise ValueError
     if shared:
-        if source_id != citation.source_path:
+        if source_id != citation.source_path or path == shared_docs_dir or not path.is_relative_to(shared_docs_dir):
             raise ValueError
-    elif source_id != citation.appointment_id or path.parts[-2:] != (patient_id, f"{source_id}.md"):
+    elif source_id != citation.appointment_id or path != visit_notes_dir / patient_id / f"{source_id}.md":
         raise ValueError
     return RetrievalResult(text, chunk_id, float(distance), patient_id, source_id, metadata["chunk_position"], citation)
