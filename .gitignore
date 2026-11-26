@@ -151,6 +151,8 @@ activemq-data/
 
 # Environments
 .env
+.env.*
+!.env.example
 .envrc
 .venv
 env/
@@ -158,6 +160,10 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+
+# Generated ChromaDB storage
+/chroma/
+/chroma_db/
 
 # Conda environments
 conda-meta/
