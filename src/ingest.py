@@ -3,9 +3,7 @@
 import argparse
 import sys
 from dataclasses import dataclass
-from hashlib import shake_256
 from pathlib import Path
-from typing import Literal
 
 from .chunking import chunk_document
 from .config import PROJECT_ROOT, AppConfig, load_config
@@ -13,18 +11,15 @@ from .csv_loader import load_appointments, load_patients
 from .data_quality import format_data_quality_summary
 from .dataset_validation import validate_dataset
 from .document_loader import load_documents
-from .embeddings import EmbeddingError, embed_chunks
+from .embeddings import EmbeddingError, embed_chunks, synthetic_vector
 from .models import DocumentChunk
 from .vector_store import (
-    SYNTHETIC_DIMENSIONS,
-    SYNTHETIC_MODEL,
+    EmbeddingMode,
     VectorStoreError,
+    index_config,
     open_chunk_collection,
     upsert_chunks,
 )
-
-type EmbeddingMode = Literal["synthetic", "openai"]
-
 
 class IngestionError(RuntimeError):
     """An ingestion stage failed and the command cannot report success."""
@@ -39,27 +34,16 @@ class IngestionResult:
 
 
 def _index_config(config: AppConfig, mode: EmbeddingMode) -> AppConfig:
-    if mode == "synthetic":
-        return config.model_copy(update={
-            "chroma_dir": config.chroma_dir / "SYNTHETIC",
-            "embedding_model": SYNTHETIC_MODEL,
-            "openai_api_key": None,
-        })
-    if mode != "openai":
-        raise IngestionError("Unknown embedding mode")
-    if config.openai_api_key is None:
+    if mode == "openai" and config.openai_api_key is None:
         raise IngestionError("OpenAI mode requires OPENAI_API_KEY")
-    return config.model_copy(update={"chroma_dir": config.chroma_dir / "openai"})
+    try:
+        return index_config(config, mode)
+    except VectorStoreError as error:
+        raise IngestionError(str(error)) from None
 
 
 def _synthetic_embeddings(chunks: list[DocumentChunk]) -> dict[str, list[float]]:
-    return {
-        chunk.chunk_id: [
-            (byte - 127.5) / 127.5
-            for byte in shake_256(chunk.text.encode("utf-8")).digest(SYNTHETIC_DIMENSIONS)
-        ]
-        for chunk in chunks
-    }
+    return {chunk.chunk_id: synthetic_vector(chunk.text) for chunk in chunks}
 
 
 def _reconcile_ids(config: AppConfig, expected: set[str]) -> int:
