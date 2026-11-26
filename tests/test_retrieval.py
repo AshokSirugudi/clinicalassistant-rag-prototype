@@ -17,6 +17,7 @@ from src.retrieval import RetrievalEmbeddingError, RetrievalError, RetrievalInde
 from src.vector_store import COLLECTION_NAME, index_config, open_chunk_collection, upsert_chunks
 
 PATIENT_IDS = {"P001", "P002", "P009"}
+ALL_PATIENT_IDS = tuple(f"P{number:03d}" for number in range(1, 11))
 QUESTION = "What was recommended for knee discomfort?"
 
 
@@ -34,19 +35,23 @@ def config(tmp_path):
 
 
 @pytest.fixture(scope="module")
-def evidence():
+def corpus_chunks():
     config = AppConfig()
     report = validate_dataset(load_patients(config.patients_csv), load_appointments(config.appointments_csv))
     documents = load_documents(config, report)
     assert not documents.errors
-    chunks = {
+    return {
         (chunk.source_id, chunk.source_metadata.section_heading): chunk
         for document in documents.documents for chunk in chunk_document(document)
     }
+
+
+@pytest.fixture(scope="module")
+def evidence(corpus_chunks):
     return (
-        chunks["A001", "Recommendations"],
-        chunks["data/shared/activity-related-discomfort.md", "Tracking Activity and Function"],
-        chunks["A034", "Recommendations"],
+        corpus_chunks["A001", "Recommendations"],
+        corpus_chunks["data/shared/activity-related-discomfort.md", "Tracking Activity and Function"],
+        corpus_chunks["A034", "Recommendations"],
     )
 
 
@@ -93,6 +98,58 @@ def test_query_filters_before_top_k_and_returns_citations(config, evidence, monk
         )
         assert hit.source_metadata == chunk.source_metadata
     assert [hit.patient_id for hit in search(config, patient_id="P002")] == ["SHARED"]
+
+
+@pytest.fixture(scope="module")
+def all_patient_index(tmp_path_factory, corpus_chunks, evidence):
+    config = AppConfig(chroma_dir=tmp_path_factory.mktemp("all-patient-index"), top_k=2)
+    by_patient = {}
+    for chunk in corpus_chunks.values():
+        if chunk.patient_id in ALL_PATIENT_IDS:
+            by_patient.setdefault(chunk.patient_id, chunk)
+    assert set(by_patient) == set(ALL_PATIENT_IDS)
+    shared = evidence[1]
+    # For query axis i, every other patient's vector has a stronger projection.
+    embeddings = {
+        by_patient[patient_id].chunk_id: [
+            float(axis != position) for axis in range(len(ALL_PATIENT_IDS))
+        ] + [0.0] * 1526
+        for position, patient_id in enumerate(ALL_PATIENT_IDS)
+    }
+    embeddings[shared.chunk_id] = [0.1] * 10 + [1.0] + [0.0] * 1525
+    index = index_config(config, "synthetic")
+    upsert_chunks(index, [*by_patient.values(), shared], embeddings)
+    return config, index, by_patient, shared
+
+
+@pytest.mark.parametrize("patient_id", ALL_PATIENT_IDS)
+def test_every_patient_excludes_closer_other_patients(patient_id, all_patient_index, monkeypatch):
+    config, index, by_patient, shared = all_patient_index
+    query_vector = [0.0] * 1536
+    query_vector[ALL_PATIENT_IDS.index(patient_id)] = 1.0
+    expected = {by_patient[patient_id].chunk_id, shared.chunk_id}
+    collection, _ = open_chunk_collection(index, create=False)
+    baseline = collection.query(query_embeddings=[query_vector], n_results=11, include=["distances"])
+    ids, = baseline["ids"]
+    distances, = baseline["distances"]
+    assert set(ids[-2:]) == expected
+    assert distances[8] < distances[9]
+
+    monkeypatch.setattr("src.retrieval.synthetic_vector", lambda question: query_vector)
+    query = Collection.query
+    calls = []
+
+    def record_query(self, **kwargs):
+        calls.append(kwargs)
+        return query(self, **kwargs)
+
+    monkeypatch.setattr(Collection, "query", record_query)
+    hits = retrieve(patient_id, QUESTION, config=config, mode="synthetic", accepted_patient_ids=ALL_PATIENT_IDS)
+    assert len(calls) == 1
+    assert calls[0]["where"] == {"patient_id": {"$in": [patient_id, "SHARED"]}}
+    assert calls[0]["n_results"] == config.top_k
+    assert len(hits) == 2 and {hit.chunk_id for hit in hits} == expected
+    assert {hit.patient_id for hit in hits} == {patient_id, "SHARED"}
 
 
 def test_synthetic_query_matches_ingestion_algorithm(config, evidence):
@@ -171,6 +228,7 @@ def test_automatic_embedding_collection_is_rejected(config):
 @pytest.mark.parametrize(("field", "value", "message"), [
     ("patient_id", "P009", "outside the selected patient scope"),
     ("source_path", "data/patients/visit_notes/P009/A001.md", "malformed evidence"),
+    ("source_path", "data/shared/P001/A001.md", "malformed evidence"),
     ("section_heading", "", "malformed evidence"),
     ("clinician", None, "malformed evidence"),
     ("chunk_id", "different-id", "malformed evidence"),
@@ -186,6 +244,26 @@ def test_malformed_or_out_of_scope_response_fails_closed(config, evidence, monke
     }
     monkeypatch.setattr(Collection, "query", lambda self, **kwargs: response)
     with pytest.raises(RetrievalError, match=message):
+        search(config)
+
+
+def test_visit_note_relabeled_as_shared_rejects_the_whole_response(config, evidence, monkeypatch):
+    _, shared, other = evidence
+    open_chunk_collection(index_config(config, "synthetic"))
+    visit_path = other.source_metadata.source_path
+    spoofed = shared.to_chroma_metadata() | {
+        "chunk_id": other.chunk_id,
+        "source_id": visit_path,
+        "source_path": visit_path,
+    }
+    response = {
+        "ids": [[shared.chunk_id, other.chunk_id]],
+        "documents": [[shared.text, other.text]],
+        "distances": [[0.1, 0.2]],
+        "metadatas": [[shared.to_chroma_metadata(), spoofed]],
+    }
+    monkeypatch.setattr(Collection, "query", lambda self, **kwargs: response)
+    with pytest.raises(RetrievalError, match="malformed evidence"):
         search(config)
 
 
