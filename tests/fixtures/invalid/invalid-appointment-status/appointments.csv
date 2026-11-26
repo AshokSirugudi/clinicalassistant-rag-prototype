@@ -1,0 +1,2 @@
+appointment_id,patient_id,appointment_date,clinician,status,visit_reason,visit_summary
+A901,P901,2026-10-10,Ellis Briarfen,rescheduled,Wrist discomfort,

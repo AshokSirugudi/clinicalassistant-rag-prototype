@@ -1,0 +1,41 @@
+appointment_id,patient_id,appointment_date,clinician,status,visit_reason,visit_summary
+A001,P001,2026-10-10,Iris Mosswick,completed,Knee discomfort,Discussed activity-related knee discomfort and recorded functional limits.
+A002,P001,2026-05-10,Iris Mosswick,completed,Seasonal allergies,Reviewed spring allergy symptoms and documented environmental triggers.
+A003,P001,2026-12-10,Iris Mosswick,scheduled,Knee follow-up,
+A004,P001,2026-08-10,Iris Mosswick,cancelled,Routine physical,
+A005,P002,2026-10-11,Owen Birchmere,completed,Cholesterol review,Reviewed lipid results and discussed activity habits.
+A006,P002,2026-05-11,Owen Birchmere,completed,Blood pressure follow-up,Reviewed home blood pressure readings and recorded follow-up goals.
+A007,P002,2026-12-11,Owen Birchmere,scheduled,Blood pressure follow-up,
+A008,P002,2026-08-11,Owen Birchmere,no_show,Lab results review,
+A009,P003,2026-10-12,Tessa Brookfen,completed,Sleep concerns,Reviewed sleep timing and recorded changes in daytime fatigue.
+A010,P003,2026-05-12,Tessa Brookfen,completed,Migraine review,Reviewed the headache diary and documented common triggers.
+A011,P003,2026-12-12,Tessa Brookfen,scheduled,Headache follow-up,
+A012,P003,2026-08-12,Tessa Brookfen,cancelled,Preventive visit,
+A013,P004,2026-10-13,Hugo Fieldwick,completed,Hearing concerns,Reviewed difficulty hearing in groups and discussed hearing assessment.
+A014,P004,2026-05-13,Hugo Fieldwick,completed,Back stiffness,Reviewed morning stiffness and recorded changes in mobility.
+A015,P004,2026-12-13,Hugo Fieldwick,scheduled,Hearing follow-up,
+A016,P004,2026-08-13,Hugo Fieldwick,no_show,Back stiffness review,
+A017,P005,2026-10-14,Alina Reedcroft,completed,Fatigue,Reviewed symptom timing and discussed follow-up assessment.
+A018,P005,2026-05-14,Alina Reedcroft,completed,Eczema follow-up,Reviewed skin irritation and documented reported triggers.
+A019,P005,2026-12-14,Alina Reedcroft,scheduled,Fatigue follow-up,
+A020,P005,2026-08-14,Alina Reedcroft,cancelled,Skin check,
+A021,P006,2026-10-15,Idris Pinewell,completed,Reflux symptoms,Reviewed symptom frequency and noted reported meal-related triggers.
+A022,P006,2026-05-15,Idris Pinewell,completed,Ankle sprain follow-up,Reviewed swelling and recorded improvement in walking comfort.
+A023,P006,2026-12-15,Idris Pinewell,scheduled,Reflux follow-up,
+A024,P006,2026-08-15,Idris Pinewell,no_show,Ankle mobility review,
+A025,P007,2026-10-16,Mae Larkmere,completed,Hip discomfort,Reviewed walking tolerance and documented symptoms after longer walks.
+A026,P007,2026-05-16,Mae Larkmere,completed,Routine physical,Reviewed preventive care history and updated the fictional record.
+A027,P007,2026-12-16,Mae Larkmere,scheduled,Hip follow-up,
+A028,P007,2026-08-16,Mae Larkmere,cancelled,Blood pressure check,
+A029,P008,2026-10-17,Nadia Elmford,completed,Exercise-related cough,Reviewed symptom timing during practice and recorded the follow-up plan.
+A030,P008,2026-05-17,Nadia Elmford,completed,Sports physical,Reviewed activity history and completed the school sports assessment.
+A031,P008,2026-12-17,Nadia Elmford,scheduled,Cough follow-up,
+A032,P008,2026-08-17,Nadia Elmford,no_show,School health form review,
+A033,P009,2026-10-18,Luca Hazelwick,completed,Seasonal allergies,Reviewed autumn symptoms and recorded their effect on sleep.
+A034,P009,2026-05-18,Luca Hazelwick,completed,Wrist discomfort,Reviewed discomfort during typing and recorded the effect of breaks.
+A035,P009,2026-12-18,Luca Hazelwick,scheduled,Allergy follow-up,
+A036,P009,2026-08-18,Luca Hazelwick,cancelled,Wrist follow-up,
+A037,P010,2026-10-19,Rhea Crestwell,completed,Foot examination,Completed a routine foot examination and documented footwear concerns.
+A038,P010,2026-05-19,Rhea Crestwell,completed,Diabetes follow-up,Reviewed the glucose log and documented home monitoring goals.
+A039,P010,2026-12-19,Rhea Crestwell,scheduled,Diabetes follow-up,
+A040,P010,2026-08-19,Rhea Crestwell,no_show,Nutrition review,

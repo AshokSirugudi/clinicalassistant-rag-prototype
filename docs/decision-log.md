@@ -40,3 +40,7 @@ The install commands have been verified in the existing workspace. The environme
 ## OpenAI credentials and billing
 
 Defer provisioning OpenAI API credentials and enabling billing until the embeddings milestone. Keep `OPENAI_API_KEY` empty in the tracked template, and keep real credentials out of Git.
+
+## Milestone 8 — Stale-chunk reconciliation
+
+The ingestion command removes stale IDs after upserting the current chunks and verifying that every current ID is present. Synthetic ingestion tests verified that editing one section and deleting a different section removes both stale IDs, retains the replacement and its metadata, and leaves exactly 71 current chunks from the original 72.
