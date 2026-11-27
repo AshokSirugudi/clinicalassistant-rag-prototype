@@ -25,6 +25,10 @@ class VectorStoreError(RuntimeError):
     """Vector store inputs, configuration, or writes failed."""
 
 
+class MissingVectorIndexError(VectorStoreError):
+    """The configured index or collection has not been created."""
+
+
 def index_config(config: AppConfig, mode: EmbeddingMode) -> AppConfig:
     """Resolve the index location and model identity for an embedding mode."""
     if mode == "synthetic":
@@ -54,7 +58,7 @@ def open_chunk_collection(config: AppConfig, *, create: bool = True):
         "embedding_dimensions": _vector_dimensions(config.embedding_model),
     }
     if not create and not (config.chroma_dir / "chroma.sqlite3").is_file():
-        raise VectorStoreError("ChromaDB index does not exist for the selected mode")
+        raise MissingVectorIndexError("ChromaDB index does not exist for the selected mode")
     try:
         client = chromadb.PersistentClient(
             path=config.chroma_dir, settings=Settings(anonymized_telemetry=False)
@@ -72,7 +76,7 @@ def open_chunk_collection(config: AppConfig, *, create: bool = True):
         metadata = collection.metadata or {}
         max_batch_size = client.get_max_batch_size()
     except NotFoundError:
-        raise VectorStoreError("ChromaDB collection does not exist for the selected mode") from None
+        raise MissingVectorIndexError("ChromaDB collection does not exist for the selected mode") from None
     except Exception:
         raise VectorStoreError("Unable to open the ChromaDB collection") from None
 

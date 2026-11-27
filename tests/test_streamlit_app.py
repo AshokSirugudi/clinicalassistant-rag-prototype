@@ -9,10 +9,11 @@ from src.answering import ANSWER_MESSAGE, UNABLE_MESSAGES, AnswerCitation, Answe
 from src.config import load_config
 from src.csv_loader import CsvIssue, load_appointments, load_patients
 from src.dataset_validation import ValidationReport, validate_dataset
-from src.ingest import ingest
+from src.ingest import IngestionError, ingest
 from src.keyword_search import retrieve_keywords
 from src.models import DocumentSourceMetadata
-from src.retrieval import RetrievalIndexError
+from src.retrieval import RetrievalIndexError, retrieve_relevant
+from src.vector_store import index_config, open_chunk_collection
 
 APP = Path(__file__).resolve().parents[1] / "src" / "streamlit_app.py"
 QUESTION = 'Find excerpts containing "knee discomfort"'
@@ -162,11 +163,88 @@ def test_unable_to_answer_messages(monkeypatch, reason):
     assert UNABLE_MESSAGES[reason] in [item.value for item in app.info]
 
 
-def test_missing_synthetic_index_shows_ingestion_command():
+def test_missing_synthetic_index_builds_once_and_keeps_patient_scope(monkeypatch):
+    monkeypatch.setenv("RETRIEVAL_TOP_K", "18")
+    config = load_config()
+    index = index_config(config, "synthetic")
+    build = Mock(wraps=ingest)
+    monkeypatch.setattr("src.ingest.ingest", build)
+    retrievals = []
+
+    def capture(patient_id, question, **options):
+        assert options["mode"] == "synthetic"
+        result = retrieve_relevant(patient_id, question, **options)
+        retrievals.append((patient_id, result))
+        return result
+
+    monkeypatch.setattr("src.answering.retrieve_relevant", capture)
+    app = open_app("P001", mode="synthetic")
+    assert config.openai_api_key is None and not index.chroma_dir.exists()
+    build.assert_not_called()
+    for patient_id, question, path in (
+        ("P001", QUESTION, "data/patients/visit_notes/P001/A001.md"),
+        ("P002", 'Find excerpts containing "home blood pressure readings"', "data/patients/visit_notes/P002/A006.md"),
+        ("P010", 'Find excerpts containing "footwear"', "data/patients/visit_notes/P010/A037.md"),
+    ):
+        app.selectbox(key="patient_id").select(patient_id).run()
+        submit(app, question)
+        assert not app.error
+        assert any(path in item.value and "Section:" in item.value for item in app.text)
+        retrieved_for, result = retrievals[-1]
+        assert retrieved_for == patient_id
+        assert {hit.patient_id for hit in result.accepted_results} == {patient_id, "SHARED"}
+        assert all(
+            hit.source_metadata.source_path.startswith(
+                "data/shared/" if hit.patient_id == "SHARED" else f"data/patients/visit_notes/{patient_id}/"
+            )
+            for hit in result.accepted_results
+        )
+
+    app.selectbox(key="embedding_mode").select("keyword").run()
+    assert app.text_area(key="question").value == "" and "submitted_answer" not in app.session_state
+    submit(app, "What about footwear?")
+    assert not app.error and any("A037.md" in item.value for item in app.text)
+    app.selectbox(key="embedding_mode").select("synthetic").run()
+    assert app.text_area(key="question").value == "" and "submitted_answer" not in app.session_state
+    app.run()
+    assert len(retrievals) == 3
+    build.assert_called_once()
+    assert build.call_args.args[1] == "synthetic"
+    collection, _ = open_chunk_collection(index, create=False)
+    assert collection.count() == 72
+    assert not (index.chroma_dir / ".initialization-pending").exists()
+    assert not (config.chroma_dir / "openai").exists()
+
+
+def test_failed_initialization_is_safe_and_retries_an_incomplete_index(monkeypatch):
+    monkeypatch.setenv("RETRIEVAL_TOP_K", "18")
+    config = load_config()
+    index = index_config(config, "synthetic")
+    attempts = []
+
+    def fail_once(config, mode):
+        attempts.append(mode)
+        if len(attempts) == 1:
+            open_chunk_collection(index)
+            raise IngestionError("private storage detail dummy-key")
+        return ingest(config, mode)
+
+    monkeypatch.setattr("src.ingest.ingest", fail_once)
     app = open_app("P001", mode="synthetic")
     submit(app)
-    assert any("synthetic index is missing" in item.value for item in app.error)
+    assert [item.value for item in app.error] == [
+        "The synthetic index could not be prepared. Check source validation and storage access.",
+    ]
     assert app.code[0].value == "python -m src.ingest --embedding-mode synthetic"
+    assert (index.chroma_dir / ".initialization-pending").is_file()
+    assert not any("Source document:" in item.value for item in app.text)
+    app.run()
+    assert attempts == ["synthetic"]
+    submit(app)
+    assert not app.error
+    assert any("A001.md" in item.value for item in app.text)
+    assert attempts == ["synthetic", "synthetic"]
+    assert not (index.chroma_dir / ".initialization-pending").exists()
 
 
 def test_storage_errors_do_not_expose_details(monkeypatch):

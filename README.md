@@ -49,7 +49,7 @@ The flow starts with the accepted CSV records. The document loader checks visit-
 | **Synthetic Vector Test** | Uses deterministic synthetic vectors to exercise ChromaDB storage, cosine queries, filtering, and citations. The vector rankings carry no semantic meaning. |
 | **OpenAI** | Prepared for real embeddings and extractive answer selection. The UI requires explicit server opt-in with `CLINICAL_RAG_ENABLE_OPENAI=1` and a configured `OPENAI_API_KEY`. Live API behavior has not been validated. |
 
-To try Synthetic Vector Test, build its separate index before selecting the mode. The default output is under `chroma/SYNTHETIC/`.
+Select **Synthetic Vector Test** and submit a question to build its separate index on first use. The following questions reuse the index. The default output is under `chroma/SYNTHETIC/`. You can also build or refresh it manually.
 
 ```bash
 .venv/bin/python -m src.ingest --embedding-mode synthetic
@@ -80,6 +80,8 @@ The suite uses temporary indexes, synthetic vectors, and fake OpenAI clients. Th
 ## Streamlit Community Cloud
 
 Choose the GitHub repository and branch in Streamlit Community Cloud. In the app settings, set **Main file path** to **`streamlit_app.py`** at the repository root and select Python 3.12. Community Cloud installs the pinned direct dependencies from `requirements.txt`. Keep the app private for a review and leave OpenAI mode disabled. Offline Keyword Search starts using the checked-in fictional data.
+
+Community Cloud can discard local files when a deployment restarts. The first Synthetic Vector Test question then rebuilds the index. Set `CHROMA_DIR` to a writable local directory if the default path is unavailable. Initialization is coordinated across sessions in one Streamlit worker. Manually refresh a retained index when the source corpus changes. Synthetic rankings can miss passages containing the requested phrase, so use Offline Keyword Search for the demo guide.
 
 ## What I would validate next
 
