@@ -2,6 +2,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 from src.answering import ANSWER_MESSAGE, UNABLE_MESSAGES, AnswerCitation, AnswerExcerpt, AnswerResult
@@ -263,3 +264,51 @@ def test_keyword_search_with_no_scoped_support_returns_unable_to_answer():
     assert UNABLE_MESSAGES["no_matches"] in [item.value for item in app.info]
     assert not app.error
     assert not any("A037.md" in item.value for item in app.text)
+
+
+def test_patient_and_strategy_changes_clear_answers_before_loading_data(monkeypatch):
+    retrieve = Mock(wraps=retrieve_keywords)
+    vector_answer = Mock(side_effect=AssertionError("Switching must not invoke retrieval"))
+    monkeypatch.setattr("src.keyword_search.retrieve_keywords", retrieve)
+    monkeypatch.setattr("src.answering.answer_question", vector_answer)
+    state_at_load = []
+
+    def observe_config_load():
+        state_at_load.append((st.session_state.get("question"), st.session_state.get("submitted_answer")))
+        return load_config()
+
+    monkeypatch.setattr("src.config.load_config", observe_config_load)
+    app = open_app("P001")
+    submit(app)
+    assert any("A001.md" in item.value for item in app.text)
+    retrieve.assert_called_once()
+    vector_answer.assert_not_called()
+
+    def assert_cleared_and_call_count(count):
+        assert not app.exception
+        assert state_at_load[-1] == ("", None)
+        assert app.text_area(key="question").value == ""
+        assert "submitted_answer" not in app.session_state
+        assert not any("Submitted question:" in item.value or "Source document:" in item.value for item in app.text)
+        assert retrieve.call_count == count
+        vector_answer.assert_not_called()
+
+    app.selectbox(key="patient_id").select("P010").run()
+    assert_cleared_and_call_count(1)
+    assert any("P010" in item.value for item in app.text)
+    submit(app, "What about footwear?")
+    assert any("A037.md" in item.value for item in app.text)
+    assert not any("A001.md" in item.value for item in app.text)
+    assert retrieve.call_count == 2
+
+    app.selectbox(key="patient_id").select("P001").run()
+    assert_cleared_and_call_count(2)
+    submit(app)
+    assert any("A001.md" in item.value for item in app.text)
+    assert retrieve.call_count == 3
+
+    strategy = app.selectbox(key="embedding_mode")
+    strategy.select("synthetic").run()
+    assert_cleared_and_call_count(3)
+    app.selectbox(key="embedding_mode").select("keyword").run()
+    assert_cleared_and_call_count(3)

@@ -47,7 +47,7 @@ def _synthetic_generator(question: str, passages: tuple[EvidencePassage, ...]) -
 
 
 def _clear_question() -> None:
-    st.session_state.pop("question", None)
+    st.session_state["question"] = ""
     st.session_state.pop("submitted_answer", None)
 
 
@@ -119,6 +119,14 @@ def main() -> None:
     st.set_page_config(page_title="Clinical RAG Assistant")
     st.title("Clinical RAG Assistant")
 
+    patient_panel = st.container()
+    # Replace the old form and answer before loading the new patient details.
+    question_panel = st.empty()
+    with patient_panel:
+        _show_patient_workspace(question_panel)
+
+
+def _show_patient_workspace(question_panel) -> None:
     try:
         config = load_config()
     except (OSError, ValueError):
@@ -139,7 +147,10 @@ def main() -> None:
         modes.append("openai")
     if st.session_state.get("embedding_mode") not in modes:
         st.session_state["embedding_mode"] = "keyword"
-    mode = st.selectbox("Retrieval strategy", modes, format_func=MODE_LABELS.__getitem__, key="embedding_mode")
+    mode = st.selectbox(
+        "Retrieval strategy", modes, format_func=MODE_LABELS.__getitem__,
+        key="embedding_mode", on_change=_clear_question,
+    )
     if mode == "keyword":
         st.caption("Offline keyword matching over fictional documents. Excerpts are for demonstration only.")
     if mode == "synthetic":
@@ -152,10 +163,11 @@ def main() -> None:
     patient_id = st.selectbox(
         "Fictional patient", sorted(patients), index=None, key="patient_id",
         format_func=lambda value: f"{patients[value].display_name} ({value})",
-        placeholder="Select a patient",
+        placeholder="Select a patient", on_change=_clear_question,
     )
     context = (patient_id, mode)
-    if st.session_state.get("answer_context") != context:
+    context_changed = st.session_state.get("answer_context") != context
+    if context_changed:
         _clear_question()
         st.session_state["answer_context"] = context
     if patient_id not in patients:
@@ -186,18 +198,19 @@ def main() -> None:
     else:
         st.info("No accepted appointments for this patient.")
 
-    with st.form("question_form"):
-        question = st.text_area(
-            "Question", key="question",
-            help='Offline example: Find excerpts containing "knee discomfort"',
-        )
-        submitted = st.form_submit_button("Ask")
-    if submitted:
-        result = _submit(patient_id, question, config, mode, patients.keys(), report)
-        st.session_state["submitted_answer"] = (context, question, result)
-    saved = st.session_state.get("submitted_answer")
-    if saved is not None and saved[0] == context:
-        _show_answer(saved[1], saved[2])
+    with question_panel.container():
+        with st.form("question_form"):
+            question = st.text_area(
+                "Question", key="question",
+                help='Offline example: Find excerpts containing "knee discomfort"',
+            )
+            submitted = st.form_submit_button("Ask")
+        if submitted and not context_changed:
+            result = _submit(patient_id, question, config, mode, patients.keys(), report)
+            st.session_state["submitted_answer"] = (context, question, result)
+        saved = st.session_state.get("submitted_answer")
+        if saved is not None and saved[0] == context:
+            _show_answer(saved[1], saved[2])
 
 
 if __name__ == "__main__":
