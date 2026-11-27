@@ -3,6 +3,7 @@
 import os
 import re
 from collections.abc import Collection
+from threading import Lock
 from typing import Literal
 
 import streamlit as st
@@ -11,12 +12,46 @@ from src.answering import AnswerResult, EvidencePassage, answer_question, genera
 from src.config import AppConfig, load_config
 from src.csv_loader import load_appointments, load_patients
 from src.dataset_validation import ValidationReport, validate_dataset
+from src.ingest import IngestionError, ingest
 from src.keyword_search import keyword_terms, retrieve_keywords
 from src.retrieval import RetrievalEmbeddingError, RetrievalError, RetrievalIndexError
+from src.vector_store import MissingVectorIndexError, VectorStoreError, index_config, open_chunk_collection
 
 MODE_LABELS = {"keyword": "Offline Keyword Search", "synthetic": "Synthetic Vector Test", "openai": "OpenAI"}
 SYNTHETIC_INGEST_COMMAND = "python -m src.ingest --embedding-mode synthetic"
 type RetrievalMode = Literal["keyword", "synthetic", "openai"]
+
+
+class SyntheticInitializationError(RuntimeError):
+    """Synthetic ingestion could not finish."""
+
+
+@st.cache_resource
+def _synthetic_build_lock() -> Lock:
+    """Share a lock across Streamlit sessions and reruns in this worker."""
+    return Lock()
+
+
+def _ensure_synthetic_index(config: AppConfig) -> None:
+    index = index_config(config, "synthetic")
+    pending = index.chroma_dir / ".initialization-pending"
+    with _synthetic_build_lock():
+        try:
+            if not pending.exists():
+                try:
+                    open_chunk_collection(index, create=False)
+                except MissingVectorIndexError:
+                    pass
+                else:
+                    return
+            # Mark the build before writing so an interrupted build can be retried.
+            with st.spinner("Preparing the synthetic test index…"):
+                pending.parent.mkdir(parents=True, exist_ok=True)
+                pending.touch()
+                ingest(config, "synthetic")
+                pending.unlink()
+        except (OSError, IngestionError):
+            raise SyntheticInitializationError from None
 
 
 def _keyword_generator(question: str, passages: tuple[EvidencePassage, ...]) -> object:
@@ -63,17 +98,21 @@ def _submit(
             return generate_answer(
                 patient_id, question, evidence, config=config, generator=_keyword_generator,
             )
-        generator = _synthetic_generator if mode == "synthetic" else make_openai_generator(config)
+        if mode == "synthetic":
+            _ensure_synthetic_index(config)
+            generator = _synthetic_generator
+        else:
+            generator = make_openai_generator(config)
         return answer_question(
             patient_id, question, config=config, mode=mode,
             accepted_patient_ids=accepted_patient_ids, generator=generator,
         )
-    except RetrievalIndexError as error:
-        if mode == "synthetic" and "does not exist" in str(error):
-            return AnswerResult(
-                "generation_failed", "The synthetic index is missing. Build it in the cloud workspace.",
-                "missing_synthetic_index",
-            )
+    except SyntheticInitializationError:
+        return AnswerResult(
+            "generation_failed", "The synthetic index could not be prepared. Check source validation and storage access.",
+            "synthetic_initialization_failed",
+        )
+    except (RetrievalIndexError, VectorStoreError):
         return AnswerResult("generation_failed", "The selected evidence index is unavailable or incompatible.")
     except RetrievalEmbeddingError:
         return AnswerResult("generation_failed", "The question could not be embedded.")
@@ -91,7 +130,7 @@ def _show_answer(question: str, result: AnswerResult) -> None:
         return
     if result.status == "generation_failed":
         st.error(result.message)
-        if result.reason == "missing_synthetic_index":
+        if result.reason == "synthetic_initialization_failed":
             st.code(SYNTHETIC_INGEST_COMMAND, language="bash")
         return
 
