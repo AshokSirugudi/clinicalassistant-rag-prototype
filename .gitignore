@@ -161,9 +161,30 @@ ENV/
 env.bak/
 venv.bak/
 
+# Local credentials and private keys
+credentials.json
+secrets.toml
+.netrc
+.npmrc
+.secrets/
+.ssh/
+**/.aws/credentials
+id_rsa
+id_dsa
+id_ecdsa
+id_ecdsa_sk
+id_ed25519
+id_ed25519_sk
+*.pem
+*.key
+*.p12
+*.pfx
+
 # Generated ChromaDB storage
 /chroma/
 /chroma_db/
+/custom-index/
+chroma.sqlite3*
 
 # Conda environments
 conda-meta/
@@ -224,6 +245,3 @@ tempCodeRunnerFile.py
 marimo/_static/
 marimo/_lsp/
 __marimo__/
-
-# Streamlit
-.streamlit/secrets.toml
